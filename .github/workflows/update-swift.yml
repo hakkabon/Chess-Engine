@@ -52,13 +52,17 @@ jobs:
       - name: Assemble XCFramework
         run: |
           set -e
-          mkdir -p engine-ffi/generated/headers
-          cp engine-ffi/generated/swift/ChessEngineKitFFI.h engine-ffi/generated/headers/
-          cp engine-ffi/generated/swift/ChessEngineKitFFI.modulemap engine-ffi/generated/headers/module.modulemap
-          rm -rf /tmp/ChessEngineKitFFI.xcframework
+          mkdir -p engine-ffi/generated/headers-x86_64 engine-ffi/generated/headers-arm64
+          cp engine-ffi/generated/swift/ChessEngineKitFFI.h engine-ffi/generated/headers-x86_64/
+          cp engine-ffi/generated/swift/ChessEngineKitFFI.modulemap engine-ffi/generated/headers-x86_64/module.modulemap
+          cp engine-ffi/generated/swift/ChessEngineKitFFI.h engine-ffi/generated/headers-arm64/
+          cp engine-ffi/generated/swift/ChessEngineKitFFI.modulemap engine-ffi/generated/headers-arm64/module.modulemap
+
           xcodebuild -create-xcframework \
-            -library target/x86_64-apple-darwin/release/libengine_ffi.a -headers engine-ffi/generated/headers \
-            -library target/aarch64-apple-darwin/release/libengine_ffi.a -headers engine-ffi/generated/headers \
+            -library target/x86_64-apple-darwin/release/libengine_ffi.a \
+            -headers engine-ffi/generated/headers-x86_64 \
+            -library target/aarch64-apple-darwin/release/libengine_ffi.a \
+            -headers engine-ffi/generated/headers-arm64 \
             -output /tmp/ChessEngineKitFFI.xcframework
 
       # Mirror the generated artifacts into the Swift-Chess repository.
