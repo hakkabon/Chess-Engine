@@ -1,0 +1,21 @@
+[workspace]
+resolver = "2"
+members = ["engine-ffi"]
+
+[package]
+name = "chess-engine"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+name = "chess_engine"
+crate-type = ["rlib"]
+
+[[bin]]
+name = "chess-engine"
+path = "src/main.rs"
+
+[profile.release]
+opt-level = 3
+lto = "thin"
+codegen-units = 1

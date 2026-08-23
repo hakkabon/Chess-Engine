@@ -1,0 +1,88 @@
+name: Update Swift bindings
+
+# Regenerate the Swift FFI bindings (and XCFramework) from the Rust engine and
+# push them to the separate Swift-Chess repository whenever the engine changes.
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  generate:
+    runs-on: macos-latest
+    steps:
+      - name: Checkout engine
+        uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-apple-darwin,aarch64-apple-darwin
+
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+
+      # Build the cdylib + the `uniffi-bindgen` CLI, then regenerate the Swift
+      # bindings. The first build produces the dylib (build.rs skips generation
+      # because the dylib isn't ready yet); touching build.rs and rebuilding with
+      # ENGINE_FFI_GEN_SWIFT=1 makes build.rs generate from the now-built dylib.
+      - name: Build FFI and generate Swift bindings
+        env:
+          ENGINE_FFI_GEN_SWIFT: "1"
+        run: |
+          cargo build -p engine-ffi --release --features cli
+          touch engine-ffi/build.rs
+          cargo build -p engine-ffi --release --features cli
+
+      # Build the static libraries for both macOS architectures.
+      - name: Build static libraries
+        run: |
+          cargo build -p engine-ffi --release --target x86_64-apple-darwin
+          cargo build -p engine-ffi --release --target aarch64-apple-darwin
+
+      # Package the static libraries + headers into an XCFramework.
+      - name: Assemble XCFramework
+        run: |
+          set -e
+          mkdir -p engine-ffi/generated/headers
+          cp engine-ffi/generated/swift/ChessEngineKitFFI.h engine-ffi/generated/headers/
+          cp engine-ffi/generated/swift/ChessEngineKitFFI.modulemap engine-ffi/generated/headers/module.modulemap
+          rm -rf /tmp/ChessEngineKitFFI.xcframework
+          xcodebuild -create-xcframework \
+            -library target/x86_64-apple-darwin/release/libengine_ffi.a -headers engine-ffi/generated/headers \
+            -library target/aarch64-apple-darwin/release/libengine_ffi.a -headers engine-ffi/generated/headers \
+            -output /tmp/ChessEngineKitFFI.xcframework
+
+      # Mirror the generated artifacts into the Swift-Chess repository.
+      - name: Push to Swift-Chess
+        env:
+          PAT: ${{ secrets.SWIFT_REPO_PAT }}
+        run: |
+          set -e
+          git clone "https://x-access-token:${PAT}@github.com/hakkabon/Swift-Chess.git" swift-out
+          cd swift-out
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          mkdir -p Sources/ChessEngineKit Frameworks
+          cp ../engine-ffi/generated/swift/ChessEngineKit.swift Sources/ChessEngineKit/
+          cp ../engine-ffi/generated/swift/ChessEngineKitFFI.h Sources/ChessEngineKit/
+          cp ../engine-ffi/generated/swift/ChessEngineKitFFI.modulemap Sources/ChessEngineKit/
+          rm -rf Frameworks/ChessEngineKitFFI.xcframework
+          cp -R /tmp/ChessEngineKitFFI.xcframework Frameworks/
+
+          git add -A
+          if git diff --cached --quiet; then
+            echo "No changes to push"
+          else
+            git commit -m "Update ChessEngineKit bindings (auto-generated from Chess-Engine)"
+            git push
+          fi

@@ -1,0 +1,24 @@
+[package]
+name = "engine-ffi"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+name = "engine_ffi"
+crate-type = ["cdylib", "staticlib"]
+
+[dependencies]
+chess-engine = { path = ".." }
+uniffi = "0.32"
+thiserror = "2"
+
+[features]
+# Enables the `uniffi-bindgen` CLI binary used by `build.rs` / CI to generate
+# the Swift bindings from the compiled cdylib.
+default = []
+cli = ["uniffi/cli"]
+
+[[bin]]
+name = "uniffi-bindgen"
+path = "src/bin/uniffi-bindgen.rs"
+required-features = ["cli"]
