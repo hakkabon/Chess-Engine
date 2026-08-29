@@ -28,38 +28,55 @@ jobs:
           path: |
             ~/.cargo/registry
             target
-          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          key: ${{ runner.os }}-${{ runner.arch }}-cargo-${{ hashFiles('**/Cargo.lock') }}
 
-      # Build the cdylib + the `uniffi-bindgen` CLI, then regenerate the Swift
-      # bindings. The first build produces the dylib (build.rs skips generation
-      # because the dylib isn't ready yet); touching build.rs and rebuilding with
-      # ENGINE_FFI_GEN_SWIFT=1 makes build.rs generate from the now-built dylib.
+      # Build the cdylib + `uniffi-bindgen`, then generate from that exact dylib.
+      # Invoking the CLI explicitly avoids relying on build.rs timestamps.
       - name: Build FFI and generate Swift bindings
-        env:
-          ENGINE_FFI_GEN_SWIFT: "1"
         run: |
+          set -euxo pipefail
           cargo build -p engine-ffi --release --features cli
-          touch engine-ffi/build.rs
-          cargo build -p engine-ffi --release --features cli
+          rm -rf engine-ffi/generated/swift
+          target/release/uniffi-bindgen generate \
+            target/release/libengine_ffi.dylib \
+            --language swift \
+            --out-dir engine-ffi/generated/swift
 
       # Build the static libraries for both macOS architectures.
       - name: Build static libraries
         run: |
+          set -euxo pipefail
           cargo build -p engine-ffi --release --target x86_64-apple-darwin
           cargo build -p engine-ffi --release --target aarch64-apple-darwin
 
-      # Package the static libraries + headers into an XCFramework.
+      # An XCFramework may contain only one library for a given platform and
+      # variant. Both inputs are macOS libraries, so merge them into one
+      # universal archive before creating the XCFramework.
       - name: Assemble XCFramework
         run: |
-          set -e
+          set -euxo pipefail
+          test -f target/x86_64-apple-darwin/release/libengine_ffi.a
+          test -f target/aarch64-apple-darwin/release/libengine_ffi.a
+          test -f engine-ffi/generated/swift/ChessEngineKit.swift
+          test -f engine-ffi/generated/swift/ChessEngineKitFFI.h
+          test -f engine-ffi/generated/swift/ChessEngineKitFFI.modulemap
+
           mkdir -p engine-ffi/generated/headers
           cp engine-ffi/generated/swift/ChessEngineKitFFI.h engine-ffi/generated/headers/
           cp engine-ffi/generated/swift/ChessEngineKitFFI.modulemap engine-ffi/generated/headers/module.modulemap
-          rm -rf /tmp/ChessEngineKitFFI.xcframework
+
+          rm -rf build/ChessEngineKitFFI.xcframework
+          mkdir -p build
+          lipo -create \
+            target/x86_64-apple-darwin/release/libengine_ffi.a \
+            target/aarch64-apple-darwin/release/libengine_ffi.a \
+            -output build/libengine_ffi.a
+          lipo -info build/libengine_ffi.a
+
           xcodebuild -create-xcframework \
-            -library target/x86_64-apple-darwin/release/libengine_ffi.a -headers engine-ffi/generated/headers \
-            -library target/aarch64-apple-darwin/release/libengine_ffi.a -headers engine-ffi/generated/headers \
-            -output /tmp/ChessEngineKitFFI.xcframework
+            -library build/libengine_ffi.a \
+            -headers engine-ffi/generated/headers \
+            -output build/ChessEngineKitFFI.xcframework
 
       # Mirror the generated artifacts into the Swift-Chess repository.
       - name: Push to Swift-Chess
@@ -75,19 +92,18 @@ jobs:
           # Generated UniFFI bindings -> Sources/ChessEngineKit/ (matches the
           # `import ChessEngineKit` used by the Swift UI). Remove any stale copy
           # that may have been left in the frontend directory.
-          mkdir -p Sources/ChessEngineKit Frameworks FFIHeaders
+          mkdir -p Sources/ChessEngineKit Frameworks
+          rm -rf FFIHeaders
           rm -f Sources/SwiftChess/ChessEngineKit.swift \
                 Sources/SwiftChess/ChessEngineKitFFI.h \
-                Sources/SwiftChess/ChessEngineKitFFI.modulemap
+                Sources/SwiftChess/ChessEngineKitFFI.modulemap \
+                Sources/ChessEngineKit/ChessEngineKitFFI.h \
+                Sources/ChessEngineKit/ChessEngineKitFFI.modulemap
           cp ../engine-ffi/generated/swift/ChessEngineKit.swift Sources/ChessEngineKit/
-          cp ../engine-ffi/generated/swift/ChessEngineKitFFI.h Sources/ChessEngineKit/
-          cp ../engine-ffi/generated/swift/ChessEngineKitFFI.modulemap Sources/ChessEngineKit/
-          cp ../engine-ffi/generated/swift/ChessEngineKitFFI.h FFIHeaders/
-          cp ../engine-ffi/generated/swift/ChessEngineKitFFI.modulemap FFIHeaders/module.modulemap
 
           # XCFramework -> Frameworks/ChessEngineKitFFI.xcframework
           rm -rf Frameworks/ChessEngineKitFFI.xcframework
-          cp -R /tmp/ChessEngineKitFFI.xcframework Frameworks/
+          cp -R ../build/ChessEngineKitFFI.xcframework Frameworks/
 
           # Point the binary target at the locally-committed framework (the old
           # remote release URL/checksum is no longer used).
@@ -97,7 +113,7 @@ jobs:
 
           let package = Package(
               name: "SwiftChess",
-              platforms: [.macOS(.v13), .iOS(.v14)],
+              platforms: [.macOS(.v13)],
               products: [
                   .library(name: "SwiftChess", targets: ["SwiftChess"]),
                   .executable(name: "ChessUI", targets: ["ChessUI"]),
@@ -128,6 +144,10 @@ jobs:
               swiftLanguageModes: [.v5]
           )
           SWIFT
+
+          # Catch malformed manifests, missing modules and linker errors before
+          # committing generated artifacts to the frontend repository.
+          swift build
 
           git add -A
           if git diff --cached --quiet; then
