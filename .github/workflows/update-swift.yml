@@ -48,6 +48,12 @@ jobs:
           cargo build -p engine-ffi --release --target x86_64-apple-darwin
           cargo build -p engine-ffi --release --target aarch64-apple-darwin
 
+      # Ensure both libraries actually exist
+      - name: Verify libraries exist
+        run: |
+          ls -lh target/x86_64-apple-darwin/release/libengine_ffi.a
+          ls -lh target/aarch64-apple-darwin/release/libengine_ffi.a
+
       # Package the static libraries + headers into an XCFramework.
       - name: Assemble XCFramework
         run: |
