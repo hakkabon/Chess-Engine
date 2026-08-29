@@ -48,27 +48,17 @@ jobs:
           cargo build -p engine-ffi --release --target x86_64-apple-darwin
           cargo build -p engine-ffi --release --target aarch64-apple-darwin
 
-      # Ensure both libraries actually exist
-      - name: Verify libraries exist
-        run: |
-          ls -lh target/x86_64-apple-darwin/release/libengine_ffi.a
-          ls -lh target/aarch64-apple-darwin/release/libengine_ffi.a
-
       # Package the static libraries + headers into an XCFramework.
       - name: Assemble XCFramework
         run: |
           set -e
-          mkdir -p engine-ffi/generated/headers-x86_64 engine-ffi/generated/headers-arm64
-          cp engine-ffi/generated/swift/ChessEngineKitFFI.h engine-ffi/generated/headers-x86_64/
-          cp engine-ffi/generated/swift/ChessEngineKitFFI.modulemap engine-ffi/generated/headers-x86_64/module.modulemap
-          cp engine-ffi/generated/swift/ChessEngineKitFFI.h engine-ffi/generated/headers-arm64/
-          cp engine-ffi/generated/swift/ChessEngineKitFFI.modulemap engine-ffi/generated/headers-arm64/module.modulemap
-
+          mkdir -p engine-ffi/generated/headers
+          cp engine-ffi/generated/swift/ChessEngineKitFFI.h engine-ffi/generated/headers/
+          cp engine-ffi/generated/swift/ChessEngineKitFFI.modulemap engine-ffi/generated/headers/module.modulemap
+          rm -rf /tmp/ChessEngineKitFFI.xcframework
           xcodebuild -create-xcframework \
-            -library target/x86_64-apple-darwin/release/libengine_ffi.a \
-            -headers engine-ffi/generated/headers-x86_64 \
-            -library target/aarch64-apple-darwin/release/libengine_ffi.a \
-            -headers engine-ffi/generated/headers-arm64 \
+            -library target/x86_64-apple-darwin/release/libengine_ffi.a -headers engine-ffi/generated/headers \
+            -library target/aarch64-apple-darwin/release/libengine_ffi.a -headers engine-ffi/generated/headers \
             -output /tmp/ChessEngineKitFFI.xcframework
 
       # Mirror the generated artifacts into the Swift-Chess repository.
@@ -82,12 +72,62 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
 
-          mkdir -p Sources/ChessEngineKit Frameworks
+          # Generated UniFFI bindings -> Sources/ChessEngineKit/ (matches the
+          # `import ChessEngineKit` used by the Swift UI). Remove any stale copy
+          # that may have been left in the frontend directory.
+          mkdir -p Sources/ChessEngineKit Frameworks FFIHeaders
+          rm -f Sources/SwiftChess/ChessEngineKit.swift \
+                Sources/SwiftChess/ChessEngineKitFFI.h \
+                Sources/SwiftChess/ChessEngineKitFFI.modulemap
           cp ../engine-ffi/generated/swift/ChessEngineKit.swift Sources/ChessEngineKit/
           cp ../engine-ffi/generated/swift/ChessEngineKitFFI.h Sources/ChessEngineKit/
           cp ../engine-ffi/generated/swift/ChessEngineKitFFI.modulemap Sources/ChessEngineKit/
+          cp ../engine-ffi/generated/swift/ChessEngineKitFFI.h FFIHeaders/
+          cp ../engine-ffi/generated/swift/ChessEngineKitFFI.modulemap FFIHeaders/module.modulemap
+
+          # XCFramework -> Frameworks/ChessEngineKitFFI.xcframework
           rm -rf Frameworks/ChessEngineKitFFI.xcframework
           cp -R /tmp/ChessEngineKitFFI.xcframework Frameworks/
+
+          # Point the binary target at the locally-committed framework (the old
+          # remote release URL/checksum is no longer used).
+          cat > Package.swift <<'SWIFT'
+          // swift-tools-version:6.0
+          import PackageDescription
+
+          let package = Package(
+              name: "SwiftChess",
+              platforms: [.macOS(.v13), .iOS(.v14)],
+              products: [
+                  .library(name: "SwiftChess", targets: ["SwiftChess"]),
+                  .executable(name: "ChessUI", targets: ["ChessUI"]),
+              ],
+              targets: [
+                  .target(
+                      name: "ChessEngineKit",
+                      dependencies: ["EngineFFI"]
+                  ),
+                  .target(
+                      name: "SwiftChess",
+                      dependencies: ["ChessEngineKit"]
+                  ),
+                  .binaryTarget(
+                      name: "EngineFFI",
+                      path: "Frameworks/ChessEngineKitFFI.xcframework"
+                  ),
+                  .executableTarget(
+                      name: "ChessUI",
+                      dependencies: ["SwiftChess", "ChessEngineKit"],
+                      path: "Sources/ChessUI"
+                  ),
+                  .testTarget(
+                      name: "SwiftChessTests",
+                      dependencies: ["SwiftChess"]
+                  ),
+              ],
+              swiftLanguageModes: [.v5]
+          )
+          SWIFT
 
           git add -A
           if git diff --cached --quiet; then
