@@ -60,9 +60,13 @@ jobs:
           set -e
           mkdir -p engine-ffi/generated/headers-x86_64 engine-ffi/generated/headers-arm64
           cp engine-ffi/generated/swift/ChessEngineKitFFI.h engine-ffi/generated/headers-x86_64/
-          cp engine-ffi/generated/swift/ChessEngineKitFFI.modulemap engine-ffi/generated/headers-x86_64/module.modulemap
           cp engine-ffi/generated/swift/ChessEngineKitFFI.h engine-ffi/generated/headers-arm64/
-          cp engine-ffi/generated/swift/ChessEngineKitFFI.modulemap engine-ffi/generated/headers-arm64/module.modulemap
+          
+          # Create architecture-specific module maps
+          sed 's/module ChessEngineKitFFI/module ChessEngineKitFFI_x86_64/' \
+            engine-ffi/generated/swift/ChessEngineKitFFI.modulemap > engine-ffi/generated/headers-x86_64/module.modulemap
+          sed 's/module ChessEngineKitFFI/module ChessEngineKitFFI_arm64/' \
+            engine-ffi/generated/swift/ChessEngineKitFFI.modulemap > engine-ffi/generated/headers-arm64/module.modulemap
 
           xcodebuild -create-xcframework \
             -library target/x86_64-apple-darwin/release/libengine_ffi.a \
