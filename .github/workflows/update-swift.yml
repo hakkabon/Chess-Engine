@@ -83,7 +83,12 @@ jobs:
         env:
           PAT: ${{ secrets.SWIFT_REPO_PAT }}
         run: |
-          set -e
+          set -euo pipefail
+          if [[ -z "${PAT}" ]]; then
+            echo "::error::SWIFT_REPO_PAT is not configured in the Chess-Engine repository"
+            exit 1
+          fi
+
           git clone "https://x-access-token:${PAT}@github.com/hakkabon/Swift-Chess.git" swift-out
           cd swift-out
           git config user.name "github-actions[bot]"
@@ -92,7 +97,7 @@ jobs:
           # Generated UniFFI bindings -> Sources/ChessEngineKit/ (matches the
           # `import ChessEngineKit` used by the Swift UI). Remove any stale copy
           # that may have been left in the frontend directory.
-          mkdir -p Sources/ChessEngineKit Frameworks
+          mkdir -p Sources/ChessEngineKit Sources/SwiftChess Frameworks
           rm -rf FFIHeaders
           rm -f Sources/SwiftChess/ChessEngineKit.swift \
                 Sources/SwiftChess/ChessEngineKitFFI.h \
@@ -100,6 +105,12 @@ jobs:
                 Sources/ChessEngineKit/ChessEngineKitFFI.h \
                 Sources/ChessEngineKit/ChessEngineKitFFI.modulemap
           cp ../engine-ffi/generated/swift/ChessEngineKit.swift Sources/ChessEngineKit/
+
+          # ChessViewModel currently imports SwiftChess. Keep that compatibility
+          # module non-empty and re-export the generated engine API from it.
+          cat > Sources/SwiftChess/SwiftChess.swift <<'SWIFT'
+          @_exported import ChessEngineKit
+          SWIFT
 
           # XCFramework -> Frameworks/ChessEngineKitFFI.xcframework
           rm -rf Frameworks/ChessEngineKitFFI.xcframework
