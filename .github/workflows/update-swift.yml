@@ -20,7 +20,7 @@ jobs:
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
         with:
-          targets: x86_64-apple-darwin,aarch64-apple-darwin
+          targets: x86_64-apple-darwin,aarch64-apple-darwin,aarch64-apple-ios,aarch64-apple-ios-sim
 
       - name: Cache cargo
         uses: actions/cache@v4
@@ -42,12 +42,13 @@ jobs:
             --language swift \
             --out-dir engine-ffi/generated/swift
 
-      # Build the static libraries for both macOS architectures.
+      # Build the static libraries for macOS (universal) and iOS (device + simulator).
       - name: Build static libraries
         run: |
-          set -euxo pipefail
           cargo build -p engine-ffi --release --target x86_64-apple-darwin
           cargo build -p engine-ffi --release --target aarch64-apple-darwin
+          cargo build -p engine-ffi --release --target aarch64-apple-ios
+          cargo build -p engine-ffi --release --target aarch64-apple-ios-sim
 
       # An XCFramework may contain only one library for a given platform and
       # variant. Both inputs are macOS libraries, so merge them into one
@@ -70,11 +71,17 @@ jobs:
           lipo -create \
             target/x86_64-apple-darwin/release/libengine_ffi.a \
             target/aarch64-apple-darwin/release/libengine_ffi.a \
-            -output build/libengine_ffi.a
-          lipo -info build/libengine_ffi.a
+            -output build/libmac.a
+          lipo -info build/libmac.a
+          cp target/aarch64-apple-ios/release/libengine_ffi.a build/libios.a
+          cp target/aarch64-apple-ios-sim/release/libengine_ffi.a build/libsim.a
 
           xcodebuild -create-xcframework \
-            -library build/libengine_ffi.a \
+            -library build/libmac.a \
+            -headers engine-ffi/generated/headers \
+            -library build/libios.a \
+            -headers engine-ffi/generated/headers \
+            -library build/libsim.a \
             -headers engine-ffi/generated/headers \
             -output build/ChessEngineKitFFI.xcframework
 
@@ -97,13 +104,11 @@ jobs:
           # Generated UniFFI bindings -> Sources/ChessEngineKit/ (matches the
           # `import ChessEngineKit` used by the Swift UI). Remove any stale copy
           # that may have been left in the frontend directory.
-          mkdir -p Sources/ChessEngineKit Sources/SwiftChess Frameworks
+          mkdir -p Sources/ChessEngineKit Sources/SwiftChess Sources/ChessUIKit Frameworks
           rm -rf FFIHeaders
           rm -f Sources/SwiftChess/ChessEngineKit.swift \
                 Sources/SwiftChess/ChessEngineKitFFI.h \
-                Sources/SwiftChess/ChessEngineKitFFI.modulemap \
-                Sources/ChessEngineKit/ChessEngineKitFFI.h \
-                Sources/ChessEngineKit/ChessEngineKitFFI.modulemap
+                Sources/SwiftChess/ChessEngineKitFFI.modulemap
           cp ../engine-ffi/generated/swift/ChessEngineKit.swift Sources/ChessEngineKit/
 
           # ChessViewModel currently imports SwiftChess. Keep that compatibility
@@ -117,16 +122,19 @@ jobs:
           cp -R ../build/ChessEngineKitFFI.xcframework Frameworks/
 
           # Point the binary target at the locally-committed framework (the old
-          # remote release URL/checksum is no longer used).
+          # remote release URL/checksum is no longer used). The UI lives in the
+          # `ChessUIKit` library (shared by the macOS app and the iOS/iPadOS app),
+          # and the package now ships an iOS slice in the XCFramework.
           cat > Package.swift <<'SWIFT'
           // swift-tools-version:6.0
           import PackageDescription
 
           let package = Package(
               name: "SwiftChess",
-              platforms: [.macOS(.v13)],
+              platforms: [.macOS(.v13), .iOS(.v14)],
               products: [
                   .library(name: "SwiftChess", targets: ["SwiftChess"]),
+                  .library(name: "ChessUIKit", targets: ["ChessUIKit"]),
                   .executable(name: "ChessUI", targets: ["ChessUI"]),
               ],
               targets: [
@@ -142,9 +150,14 @@ jobs:
                       name: "EngineFFI",
                       path: "Frameworks/ChessEngineKitFFI.xcframework"
                   ),
+                  .target(
+                      name: "ChessUIKit",
+                      dependencies: ["SwiftChess", "ChessEngineKit"],
+                      path: "Sources/ChessUIKit"
+                  ),
                   .executableTarget(
                       name: "ChessUI",
-                      dependencies: ["SwiftChess", "ChessEngineKit"],
+                      dependencies: ["ChessUIKit"],
                       path: "Sources/ChessUI"
                   ),
                   .testTarget(

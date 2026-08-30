@@ -3,7 +3,7 @@
 A chess engine written in Rust, exposed to other languages through a
 [uniffi](https://github.com/mozilla/uniffi-rs) foreign-function interface (FFI).
 The FFI module is named **`ChessEngineKit`** and is consumed today by the Swift
-package in `../swift` (a macOS SwiftUI app).
+package in `../Swift-Chess` (a multiplatform macOS + iOS/iPadOS SwiftUI app).
 
 This crate is both a normal Rust library (so it can be unit- and perft-tested
 with `cargo test`) and a C-compatible library (`cdylib` + `staticlib`) that
@@ -28,6 +28,9 @@ uniffi turns into Swift bindings and an XCFramework.
   and the played move list).
 - **UCI protocol** — a standalone `chess-engine` binary speaks the Universal
   Chess Interface for engine-vs-engine play, CLI testing, and GUI integration.
+- **Computer vs Computer** — `GameCore::self_play` drives *both* sides with the
+  search (see `game.rs`). The Swift app exposes this as a "Computer vs Computer"
+  mode that plays the whole game automatically.
 - **Perft-verified** move generation (see `tests/`).
 
 The FFI does **not** expose SAN/UCI *input* parsing — moves are made by
@@ -165,15 +168,19 @@ single build yields everything the FFI pipeline needs.
 
 ### Cross-compiling the static library for Apple targets
 
-The Swift XCFramework links the **static** library (`libchess_engine.a`). Build
+The Swift XCFramework links the **static** library (`libengine_ffi.a`). Build
 one slice per architecture you intend to ship:
 
 ```bash
+# macOS (universal = x86_64 + arm64)
 cargo build --release --target x86_64-apple-darwin
-cargo build --release --target aarch64-apple-darwin   # Apple Silicon
+cargo build --release --target aarch64-apple-darwin
+# iOS device + simulator (arm64)
+cargo build --release --target aarch64-apple-ios
+cargo build --release --target aarch64-apple-ios-sim
 ```
 
-The artifacts land in `target/<triple>/release/libchess_engine.a`.
+The artifacts land in `target/<triple>/release/libengine_ffi.a`.
 
 ---
 
@@ -208,13 +215,22 @@ static libraries and headers:
 
 1. Put the generated `ChessEngineKitFFI.h` and a `module.modulemap` (renamed
    from `ChessEngineKitFFI.modulemap`) into a `Headers/` folder.
-2. Create the framework:
+2. Merge the two macOS slices into one universal archive, then create the
+   multi-platform framework (macOS + iOS device + iOS simulator):
 
 ```bash
+lipo -create \
+  target/x86_64-apple-darwin/release/libengine_ffi.a \
+  target/aarch64-apple-darwin/release/libengine_ffi.a \
+  -output /tmp/libmac.a
+cp target/aarch64-apple-ios/release/libengine_ffi.a        /tmp/libios.a
+cp target/aarch64-apple-ios-sim/release/libengine_ffi.a   /tmp/libsim.a
+
 xcodebuild -create-xcframework \
-  -library target/x86_64-apple-darwin/release/libchess_engine.a -headers Headers \
-  -library target/aarch64-apple-darwin/release/libchess_engine.a -headers Headers \
-  -output swift/Frameworks/ChessEngineKitFFI.xcframework
+  -library /tmp/libmac.a      -headers Headers \
+  -library /tmp/libios.a      -headers Headers \
+  -library /tmp/libsim.a      -headers Headers \
+  -output Swift-Chess/Frameworks/ChessEngineKitFFI.xcframework
 ```
 
 ### Quick rebuild (no API change)
@@ -225,14 +241,14 @@ Swift file:
 
 ```bash
 cargo build --release --target x86_64-apple-darwin
-cp target/x86_64-apple-darwin/release/libchess_engine.a \
-   swift/Frameworks/ChessEngineKitFFI.xcframework/macos-x86_64/libchess_engine.a
+cp target/x86_64-apple-darwin/release/libengine_ffi.a \
+   Swift-Chess/Frameworks/ChessEngineKitFFI.xcframework/macos-arm64_x86_64/libengine_ffi.a
 ```
 
 Then, in the Swift package, force a relink:
 
 ```bash
-cd swift && swift package reset && swift build
+cd Swift-Chess && swift package reset && swift build
 ```
 
 ---
@@ -277,17 +293,18 @@ src/
   perft.rs        # perft / perft-divide (used by tests)
   tables.rs       # attack tables
   bin/uniffi-bindgen.rs  # wrapper exposing the uniffi CLI binary
-tests/            # perft and search integration tests
-swift/            # SwiftPM package + macOS app (see swift/README.md)
+  tests/            # perft and search integration tests
+  Swift-Chess/      # SwiftPM package + macOS app + iOS/iPadOS Xcode app
+                    # (see Swift-Chess/README.md)
 ```
 
 ---
 
 ## Known limitations
 
-- The shipped XCFramework currently contains only the **x86_64** slice, so the
-  Swift side runs under Rosetta on Apple Silicon. Add the `aarch64` slice (above)
-  for a native arm64 build.
+- The shipped XCFramework contains **macOS** (x86_64 + arm64) and **iOS**
+  (arm64 device + arm64 simulator) slices. There is no x86_64 iOS simulator
+  slice, so the iOS simulator only runs on Apple Silicon Macs.
 - No UCI/SAN *input* parsing in the **FFI**; moves are made by square index.
   (UCI input/output *is* supported by the separate `chess-engine` binary — see
   the "UCI engine (CLI)" section above.)

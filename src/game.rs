@@ -157,6 +157,29 @@ impl GameCore {
         Ok((m, score))
     }
 
+    /// Play a full game with **both** sides driven by the engine's search
+    /// (Computer vs Computer). Each side searches to `depth` and the resulting
+    /// move is applied, exactly as a normal game would proceed.
+    ///
+    /// Returns the list of SAN moves played. The game stops early when it is
+    /// over or once `max_moves` plies have been played.
+    pub fn self_play(&mut self, depth: u8, max_moves: u16) -> Vec<String> {
+        let mut played = Vec::new();
+        let mut steps: u16 = 0;
+        while !self.is_over() && steps < max_moves {
+            match self.best_move(depth) {
+                Ok(_) => {
+                    if let Some(san) = self.last_san() {
+                        played.push(san.to_string());
+                    }
+                    steps += 1;
+                }
+                Err(_) => break,
+            }
+        }
+        played
+    }
+
     pub fn evaluate(&self) -> i32 {
         evaluate(&self.pos)
     }
@@ -290,6 +313,16 @@ mod tests {
                 m
             );
         }
+    }
+
+    #[test]
+    fn self_play_runs_and_records_moves() {
+        let mut g = GameCore::new();
+        let moves = g.self_play(2, 300);
+        assert!(!moves.is_empty(), "self-play should produce moves");
+        assert_eq!(moves.len(), g.sans().len(), "every move must be recorded");
+        // The game must be over or capped by max_moves.
+        assert!(g.is_over() || g.sans().len() >= 300);
     }
 
     #[test]
