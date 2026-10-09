@@ -9,6 +9,7 @@ pub mod position;
 pub mod pgn;
 pub mod san;
 pub mod search;
+pub mod see;
 pub mod tables;
 pub mod uci;
 pub mod zobrist;
