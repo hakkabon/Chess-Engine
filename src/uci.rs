@@ -7,7 +7,7 @@ use crate::bitboard::{move_to_uci, square_from_name};
 use crate::movegen::generate_legal;
 use crate::pieces::PieceKind;
 use crate::position::*;
-use crate::search::{search_info, MATE};
+use crate::search::{search_info, search_info_time_control, MATE};
 
 /// Parse a UCI move string like `e2e4` or `e7e8q` into a legal `Move`.
 pub fn parse_uci(pos: &Position, uci: &str) -> Result<Move, String> {
@@ -110,7 +110,7 @@ pub fn run_uci() {
                 }
             }
             "go" => {
-                let (max_depth, time_ms, use_stop) = parse_go(&rest);
+                let (max_depth, time_ms, use_stop, wtime, btime, winc, binc, moves_to_go) = parse_go(&rest);
                 stop.store(false, Ordering::Relaxed);
 
                 let pos_clone = pos.clone();
@@ -126,7 +126,10 @@ pub fn run_uci() {
                             }
                         }
                     }
-                    let info = if use_stop {
+                    let info = if wtime > 0 || btime > 0 {
+                        // Time control mode
+                        search_info_time_control(&pos_clone, max_depth, wtime, btime, winc, binc, moves_to_go, if use_stop { Some(stop_clone.as_ref()) } else { None })
+                    } else if use_stop {
                         search_info(&pos_clone, max_depth, time_ms, Some(stop_clone.as_ref()))
                     } else {
                         search_info(&pos_clone, max_depth, time_ms, None)
@@ -155,11 +158,16 @@ pub fn run_uci() {
     }
 }
 
-/// Interpret a `go` command's arguments into (max_depth, time_ms, use_stop_flag).
-fn parse_go(rest: &[&str]) -> (u8, u64, bool) {
+/// Interpret a `go` command's arguments into search parameters.
+fn parse_go(rest: &[&str]) -> (u8, u64, bool, u64, u64, u64, u64, u32) {
     let mut depth: Option<u32> = None;
     let mut movetime: Option<u64> = None;
     let mut infinite = false;
+    let mut wtime: u64 = 0;
+    let mut btime: u64 = 0;
+    let mut winc: u64 = 0;
+    let mut binc: u64 = 0;
+    let mut moves_to_go: u32 = 0;
     let mut i = 0;
     while i < rest.len() {
         match rest[i] {
@@ -179,20 +187,50 @@ fn parse_go(rest: &[&str]) -> (u8, u64, bool) {
                 infinite = true;
                 i += 1;
             }
-            "wtime" | "btime" | "winc" | "binc" | "nodes" => i += 2,
+            "wtime" => {
+                if i + 1 < rest.len() {
+                    wtime = rest[i + 1].parse().unwrap_or(0);
+                }
+                i += 2;
+            }
+            "btime" => {
+                if i + 1 < rest.len() {
+                    btime = rest[i + 1].parse().unwrap_or(0);
+                }
+                i += 2;
+            }
+            "winc" => {
+                if i + 1 < rest.len() {
+                    winc = rest[i + 1].parse().unwrap_or(0);
+                }
+                i += 2;
+            }
+            "binc" => {
+                if i + 1 < rest.len() {
+                    binc = rest[i + 1].parse().unwrap_or(0);
+                }
+                i += 2;
+            }
+            "movestogo" => {
+                if i + 1 < rest.len() {
+                    moves_to_go = rest[i + 1].parse().unwrap_or(0);
+                }
+                i += 2;
+            }
+            "nodes" => i += 2,
             _ => i += 1,
         }
     }
 
     if let Some(d) = depth {
-        (d as u8, 3_600_000, false)
+        (d as u8, 3_600_000, false, wtime, btime, winc, binc, moves_to_go)
     } else if let Some(ms) = movetime {
-        (64, ms, false)
+        (64, ms, false, wtime, btime, winc, binc, moves_to_go)
     } else if infinite {
-        (64, 3_600_000, true)
+        (64, 3_600_000, true, wtime, btime, winc, binc, moves_to_go)
     } else {
         // Fixed search as a sensible default (e.g. `go` with no arguments).
-        (4, 1000, false)
+        (4, 1000, false, wtime, btime, winc, binc, moves_to_go)
     }
 }
 
