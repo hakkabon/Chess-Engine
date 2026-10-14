@@ -633,6 +633,13 @@ public protocol ChessGameProtocol: AnyObject, Sendable {
      */
     func setTag(key: String, value: String) 
     
+    /**
+     * Get suggested moves with evaluations for the current position.
+     * Returns a list of candidate moves sorted by evaluation (best first),
+     * each with its evaluation in centipawns and the search depth used.
+     */
+    func suggestMoves(maxDepth: UInt8, timeMs: UInt64, maxSuggestions: UInt8)  -> [MoveSuggestion]
+    
     func undoMove() throws  -> GameState
     
 }
@@ -848,6 +855,23 @@ open func setTag(key: String, value: String)  {try! rustCall() {
         FfiConverterString.lower(value),uniffiCallStatus
     )
 }
+}
+    
+    /**
+     * Get suggested moves with evaluations for the current position.
+     * Returns a list of candidate moves sorted by evaluation (best first),
+     * each with its evaluation in centipawns and the search depth used.
+     */
+open func suggestMoves(maxDepth: UInt8, timeMs: UInt64, maxSuggestions: UInt8) -> [MoveSuggestion]  {
+    return try!  FfiConverterSequenceTypeMoveSuggestion.lift(try! rustCall() {
+        uniffiCallStatus in
+    uniffi_engine_ffi_fn_method_chessgame_suggest_moves(
+            self.uniffiCloneHandle(),
+        FfiConverterUInt8.lower(maxDepth),
+        FfiConverterUInt64.lower(timeMs),
+        FfiConverterUInt8.lower(maxSuggestions),uniffiCallStatus
+    )
+})
 }
     
 open func undoMove()throws  -> GameState  {
@@ -1102,6 +1126,67 @@ public func FfiConverterTypeMoveData_lift(_ buf: RustBuffer) throws -> MoveData 
 #endif
 public func FfiConverterTypeMoveData_lower(_ value: MoveData) -> RustBuffer {
     return FfiConverterTypeMoveData.lower(value)
+}
+
+
+/**
+ * A suggested move with its evaluation and depth.
+ */
+public struct MoveSuggestion: Equatable, Hashable {
+    public var mv: MoveData
+    public var evaluationCp: Int32
+    public var depth: UInt8
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(mv: MoveData, evaluationCp: Int32, depth: UInt8) {
+        self.mv = mv
+        self.evaluationCp = evaluationCp
+        self.depth = depth
+    }
+
+    
+
+    
+}
+
+#if compiler(>=6)
+extension MoveSuggestion: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeMoveSuggestion: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> MoveSuggestion {
+        return
+            try MoveSuggestion(
+                mv: FfiConverterTypeMoveData.read(from: &buf), 
+                evaluationCp: FfiConverterInt32.read(from: &buf), 
+                depth: FfiConverterUInt8.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: MoveSuggestion, into buf: inout [UInt8]) {
+        FfiConverterTypeMoveData.write(value.mv, into: &buf)
+        FfiConverterInt32.write(value.evaluationCp, into: &buf)
+        FfiConverterUInt8.write(value.depth, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeMoveSuggestion_lift(_ buf: RustBuffer) throws -> MoveSuggestion {
+    return try FfiConverterTypeMoveSuggestion.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeMoveSuggestion_lower(_ value: MoveSuggestion) -> RustBuffer {
+    return FfiConverterTypeMoveSuggestion.lower(value)
 }
 
 
@@ -1514,6 +1599,31 @@ fileprivate struct FfiConverterSequenceTypeMoveData: FfiConverterRustBuffer {
     }
 }
 
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+fileprivate struct FfiConverterSequenceTypeMoveSuggestion: FfiConverterRustBuffer {
+    typealias SwiftType = [MoveSuggestion]
+
+    public static func write(_ value: [MoveSuggestion], into buf: inout [UInt8]) {
+        let len = Int32(value.count)
+        writeInt(&buf, len)
+        for item in value {
+            FfiConverterTypeMoveSuggestion.write(item, into: &buf)
+        }
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> [MoveSuggestion] {
+        let len: Int32 = try readInt(&buf)
+        var seq = [MoveSuggestion]()
+        seq.reserveCapacity(Int(len))
+        for _ in 0 ..< len {
+            seq.append(try FfiConverterTypeMoveSuggestion.read(from: &buf))
+        }
+        return seq
+    }
+}
+
 private enum InitializationResult {
     case ok
     case contractVersionMismatch
@@ -1569,6 +1679,9 @@ private let initializationResult: InitializationResult = {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_engine_ffi_checksum_method_chessgame_set_tag() != 48079) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_engine_ffi_checksum_method_chessgame_suggest_moves() != 47861) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_engine_ffi_checksum_method_chessgame_undo_move() != 36898) {

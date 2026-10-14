@@ -329,6 +329,11 @@ RustBuffer uniffi_engine_ffi_fn_method_chessgame_save_pgn(uint64_t ptr, RustCall
 void uniffi_engine_ffi_fn_method_chessgame_set_tag(uint64_t ptr, RustBuffer key, RustBuffer value, RustCallStatus *_Nonnull out_status
 );
 #endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_ENGINE_FFI_FN_METHOD_CHESSGAME_SUGGEST_MOVES
+#define UNIFFI_FFIDEF_UNIFFI_ENGINE_FFI_FN_METHOD_CHESSGAME_SUGGEST_MOVES
+RustBuffer uniffi_engine_ffi_fn_method_chessgame_suggest_moves(uint64_t ptr, uint8_t max_depth, uint64_t time_ms, uint8_t max_suggestions, RustCallStatus *_Nonnull out_status
+);
+#endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ENGINE_FFI_FN_METHOD_CHESSGAME_UNDO_MOVE
 #define UNIFFI_FFIDEF_UNIFFI_ENGINE_FFI_FN_METHOD_CHESSGAME_UNDO_MOVE
 RustBuffer uniffi_engine_ffi_fn_method_chessgame_undo_move(uint64_t ptr, RustCallStatus *_Nonnull out_status
@@ -675,6 +680,12 @@ uint16_t uniffi_engine_ffi_checksum_method_chessgame_save_pgn(void
 #ifndef UNIFFI_FFIDEF_UNIFFI_ENGINE_FFI_CHECKSUM_METHOD_CHESSGAME_SET_TAG
 #define UNIFFI_FFIDEF_UNIFFI_ENGINE_FFI_CHECKSUM_METHOD_CHESSGAME_SET_TAG
 uint16_t uniffi_engine_ffi_checksum_method_chessgame_set_tag(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_ENGINE_FFI_CHECKSUM_METHOD_CHESSGAME_SUGGEST_MOVES
+#define UNIFFI_FFIDEF_UNIFFI_ENGINE_FFI_CHECKSUM_METHOD_CHESSGAME_SUGGEST_MOVES
+uint16_t uniffi_engine_ffi_checksum_method_chessgame_suggest_moves(void
     
 );
 #endif

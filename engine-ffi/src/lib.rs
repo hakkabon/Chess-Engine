@@ -90,6 +90,14 @@ pub struct MoveData {
     pub san: String,
 }
 
+/// A suggested move with its evaluation and depth.
+#[derive(Clone, Debug, uniffi::Record)]
+pub struct MoveSuggestion {
+    pub mv: MoveData,
+    pub evaluation_cp: i32,
+    pub depth: u8,
+}
+
 #[derive(Clone, Debug, uniffi::Record)]
 pub struct GameState {
     pub fen: String,
@@ -201,6 +209,52 @@ impl ChessGame {
                 move_data_from(*m, &san)
             })
             .collect()
+    }
+
+    /// Get suggested moves with evaluations for the current position.
+    /// Returns a list of candidate moves sorted by evaluation (best first),
+    /// each with its evaluation in centipawns and the search depth used.
+    pub fn suggest_moves(&self, max_depth: u8, time_ms: u64, max_suggestions: u8) -> Vec<MoveSuggestion> {
+        let mut core = self.core.lock().unwrap_or_else(|e| e.into_inner());
+        if core.is_over() {
+            return Vec::new();
+        }
+        
+        let root_moves = core.legal_moves();
+        if root_moves.is_empty() {
+            return Vec::new();
+        }
+        
+        let num_moves = root_moves.len();
+        
+        // Search each root move individually to get evaluations
+        let mut suggestions = Vec::new();
+        
+        for m in &root_moves {
+            let mut child = core.pos.clone();
+            child.make_move(*m);
+            
+            // Search with time budget divided among moves, but cap per move
+            let move_time = (time_ms / num_moves as u64).max(50).min(time_ms);
+            let info = chess_engine::search::search_info(&child, max_depth, move_time, None);
+            
+            // Score from our perspective (negate since child is opponent's turn)
+            let eval = -info.score;
+            
+            let san = chess_engine::search::move_san(&core.pos, m);
+            suggestions.push(MoveSuggestion {
+                mv: move_data_from(*m, &san),
+                evaluation_cp: eval,
+                depth: info.depth as u8,
+            });
+        }
+        
+        // Sort by evaluation (best first for side to move)
+        suggestions.sort_by(|a, b| b.evaluation_cp.cmp(&a.evaluation_cp));
+        
+        // Limit to max_suggestions
+        suggestions.truncate(max_suggestions as usize);
+        suggestions
     }
 
     pub fn make_move(
